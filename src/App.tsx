@@ -1147,14 +1147,7 @@ export default function App() {
           idx === currentIdx ? { ...s, isWatched: true } : s
         );
       }
-
-      // Se for anime semanal com dia de lançamento ativo
-      if (anime.broadcastDay && anime.broadcastDay.trim()) {
-        updatedStatus = 'waiting_new_episodes';
-      } else {
-        // Anime finalizado sem mais lançamentos
-        updatedStatus = 'completed';
-      }
+      // O status da obra é mantido exatamente como escolhido pelo usuário (fim do 'completed' automático)
     } else if (anime.status === 'plan_to_watch' || anime.status === 'waiting_new_episodes') {
       updatedStatus = 'watching';
     }

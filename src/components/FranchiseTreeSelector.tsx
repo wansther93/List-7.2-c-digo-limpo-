@@ -108,7 +108,8 @@ export const FranchiseTreeSelector: React.FC<FranchiseTreeSelectorProps> = ({
       if (onExcludedItemsChange) onExcludedItemsChange([]);
     }
     try {
-      const res = await fetchAnimeFranchiseTree(overrideQuery ? query : (malId || query), query);
+      // Sempre busca a árvore completa da franquia pelo título da obra (query), desacoplando totalmente da capa ou OVA selecionada
+      const res = await fetchAnimeFranchiseTree(query, query);
       const activeExcluded = resetExclusions ? [] : excludedItemIds;
       const excludedNorm = (activeExcluded || []).map((x) => String(x).toLowerCase().trim());
 

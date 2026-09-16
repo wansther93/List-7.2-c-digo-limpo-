@@ -251,19 +251,7 @@ export const syncSingleAnimeMetadata = async (
     }
   }
 
-  // Se a obra inteira foi concluída (sem temporadas futuras confirmadas) e o usuário estava aguardando novos episódios
-  const isWholeWorkFinished = freshData.aggregatedStatus?.state === 'finished';
-  if (isWholeWorkFinished && anime.status === 'waiting_new_episodes') {
-    const allSeasonsWatched = anime.seasons && anime.seasons.length > 1
-      ? anime.seasons.every((s) => s.isWatched)
-      : Boolean(freshData.totalEpisodes && anime.currentEpisode >= freshData.totalEpisodes);
-
-    if (allSeasonsWatched) {
-      updates.status = 'completed';
-      statusChanged = true;
-      newStatus = 'completed';
-    }
-  }
+  // O status da obra (ex: watching, waiting_new_episodes, etc.) é soberano e escolhido pelo usuário; não é forçado para 'completed' automaticamente.
 
   if (freshData.mal_id && !anime.mal_id) {
     updates.mal_id = freshData.mal_id;

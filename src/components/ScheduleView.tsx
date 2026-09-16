@@ -635,34 +635,44 @@ export const ScheduleView: React.FC<ScheduleViewProps> = ({
       }
     }
 
-    // 3. Match de Franquia / Sequência / Temporadas para lançamentos novos não mapeados ainda
+    // 3. Match de Franquia / Sequência / Temporadas para lançamentos novos não mapeados ainda por ID
+    // Prioridade total para correspondência estrita e proteção contra nomes comuns como "Another"
     const cRoot = getFranchiseRootTitle(item.title).toLowerCase().trim();
     const cEngRoot = item.title_english ? getFranchiseRootTitle(item.title_english).toLowerCase().trim() : '';
     const cJap = (item.title_japanese || '').toLowerCase().trim();
 
+    const isGenericShortRoot = (r: string) => {
+      if (!r || r.length <= 4) return true;
+      const COMMON_WORDS = new Set(['another', 'monster', 'nana', 'free', 'orange', 'major', 'clannad', 'shiki', 'given', 'solo', 'alive', 'blood', 'reset', 'restart', 'world', 'story']);
+      return COMMON_WORDS.has(r);
+    };
+
+    const isSafeFranchiseMatch = (u: string, c: string): boolean => {
+      if (!u || !c) return false;
+      if (u === c) return true;
+      if (isGenericShortRoot(u) || isGenericShortRoot(c)) return false;
+      if (u.length >= 6 && (c.startsWith(u + ':') || c.startsWith(u + ' -') || c.startsWith(u + ' –'))) return true;
+      if (c.length >= 6 && (u.startsWith(c + ':') || u.startsWith(c + ' -') || u.startsWith(c + ' –'))) return true;
+      return false;
+    };
+
     for (const { anime, root: uRoot, rootJap: uJap } of roots) {
-      if (uRoot && cRoot) {
-        if (uRoot === cRoot || (uRoot.length >= 4 && cRoot.length >= 4 && (uRoot.includes(cRoot) || cRoot.includes(uRoot)))) {
-          const res = { inTracker: true, isFranchise: true, matchedAnime: anime };
-          matchResultCache.current.set(cacheKey, res);
-          return res;
-        }
+      if (uRoot && cRoot && isSafeFranchiseMatch(uRoot, cRoot)) {
+        const res = { inTracker: true, isFranchise: true, matchedAnime: anime };
+        matchResultCache.current.set(cacheKey, res);
+        return res;
       }
 
-      if (uRoot && cEngRoot) {
-        if (uRoot === cEngRoot || (uRoot.length >= 4 && cEngRoot.length >= 4 && (uRoot.includes(cEngRoot) || cEngRoot.includes(uRoot)))) {
-          const res = { inTracker: true, isFranchise: true, matchedAnime: anime };
-          matchResultCache.current.set(cacheKey, res);
-          return res;
-        }
+      if (uRoot && cEngRoot && isSafeFranchiseMatch(uRoot, cEngRoot)) {
+        const res = { inTracker: true, isFranchise: true, matchedAnime: anime };
+        matchResultCache.current.set(cacheKey, res);
+        return res;
       }
 
-      if (uJap && cJap) {
-        if (uJap === cJap || (uJap.length >= 4 && (uJap.includes(cJap) || cJap.includes(uJap)))) {
-          const res = { inTracker: true, isFranchise: true, matchedAnime: anime };
-          matchResultCache.current.set(cacheKey, res);
-          return res;
-        }
+      if (uJap && cJap && isSafeFranchiseMatch(uJap, cJap)) {
+        const res = { inTracker: true, isFranchise: true, matchedAnime: anime };
+        matchResultCache.current.set(cacheKey, res);
+        return res;
       }
     }
 

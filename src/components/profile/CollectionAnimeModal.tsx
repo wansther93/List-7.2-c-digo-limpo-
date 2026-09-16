@@ -20,7 +20,7 @@ import {
 import type { Anime } from '../../types';
 import { STATUS_CONFIG } from '../../types';
 import type { AnimeStreamingLink, AnimeCharacterItem } from '../../services/jikanService';
-import { getAnimeBanner } from '../../services/jikanService';
+import { getAnimeBanner, getHighResImageUrl } from '../../services/jikanService';
 import type { AnimeThemeMedia } from '../../services/animeThemesService';
 import { updateAnime } from '../../services/animeService';
 import {
@@ -231,28 +231,17 @@ export const CollectionAnimeModal: React.FC<CollectionAnimeModalProps> = ({
         className="relative w-full max-w-3xl my-auto bg-black border border-white/10 rounded-2xl shadow-2xl overflow-hidden flex flex-col text-zinc-100 max-h-[92vh]"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Banner Superior */}
+        {/* Banner Superior - Imagem 100% nítida e vibrante, sem desfoque (blur), sem opacidade ou filtros escuros */}
         <div className="relative h-48 sm:h-56 w-full bg-zinc-950 flex-shrink-0 overflow-hidden">
           <div className="absolute inset-0 overflow-hidden">
-            {effectiveBanner ? (
-              <img
-                src={effectiveBanner}
-                alt={anime.title}
-                referrerPolicy="no-referrer"
-                className="w-full h-full object-cover object-center brightness-100"
-              />
-            ) : (
-              <div className="w-full h-full relative overflow-hidden bg-zinc-900">
-                <img
-                  src={anime.coverUrl}
-                  alt={anime.title}
-                  referrerPolicy="no-referrer"
-                  className="w-full h-full object-cover object-center blur-sm scale-105 opacity-80 brightness-95"
-                />
-              </div>
-            )}
-            {/* Gradiente sutil apenas na base para permitir a leitura clara das tags sem apagar a arte do topo */}
-            <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent pointer-events-none" />
+            <img
+              src={getHighResImageUrl(effectiveBanner || anime.coverUrl)}
+              alt={anime.title}
+              referrerPolicy="no-referrer"
+              className="w-full h-full object-cover object-center brightness-100"
+            />
+            {/* Sombra suave apenas na base do banner para fundir suavemente com o fundo sem cobrir a imagem */}
+            <div className="absolute bottom-0 inset-x-0 h-16 bg-gradient-to-t from-black via-black/60 to-transparent pointer-events-none" />
           </div>
 
           {/* Botões do Topo */}

@@ -492,11 +492,12 @@ function formatMediaTitlePT(title: string, format: string, index: number, rootTi
 }
 
 /**
- * Filtro de relevância de franquia para evitar poluição (crossovers como Isekai Quartet)
+ * Filtro de relevância de franquia para evitar poluição em buscas textuais livres
  */
 function isRelevantFranchiseNode(
   nodeTitle: string,
-  rootWords: string[]
+  rootWords: string[],
+  rootTitle?: string
 ): boolean {
   if (!nodeTitle) return false;
   const lower = nodeTitle.toLowerCase();
@@ -506,14 +507,36 @@ function isRelevantFranchiseNode(
     return false;
   }
 
-  // Pelo menos 1 palavra chave da raiz deve bater
-  const matchedWords = rootWords.filter(w => lower.includes(w));
+  // Proteção para raízes de nomes comuns/curtos como "Another", evitando isekais e falsos positivos
+  const normRoot = (rootTitle || '').toLowerCase().trim();
+  if (normRoot === 'another') {
+    // Se a busca é pela obra de suspense "Another", rejeita títulos isekai/frases em inglês contendo "another world", "in another", etc.
+    if (lower.includes('another world') || lower.includes('in another') || lower.includes('to another') || lower.includes('with another')) {
+      return false;
+    }
+    // Deve conter a palavra exata com limite de palavra
+    return /\banother\b/i.test(lower);
+  }
+
+  // Se a raiz tem apenas 1 palavra curta/comum (ex: "monster", "free", "nana")
+  if (rootWords.length === 1 && rootWords[0].length <= 5) {
+    const singleWord = rootWords[0];
+    const regex = new RegExp(`\\b${singleWord}\\b`, 'i');
+    return regex.test(lower);
+  }
+
+  // Pelo menos 1 palavra chave da raiz deve bater com limite de palavra
+  const matchedWords = rootWords.filter(w => {
+    const regex = new RegExp(`\\b${w}\\b`, 'i');
+    return regex.test(lower);
+  });
   return matchedWords.length > 0;
 }
 
 /**
  * Busca Recursiva em Tempo Real da Árvore Genealógica de Franquia (AniList GraphQL Avançado)
- * Combina busca direta por nó + busca abrangente de franquia + exploração em grafo de relações.
+ * Combina busca direta por nó + busca abrangente de franquia + exploração bidimensional em grafo (BFS).
+ * Percorre prequels e sequels para frente e para trás sem parar em profundidade única.
  */
 export async function fetchAnimeFranchiseTree(
   searchQueryOrMalId: string | number,
@@ -702,13 +725,13 @@ export async function fetchAnimeFranchiseTree(
       const targetMedia = json?.data?.targetMedia;
       const franchiseList: any[] = json?.data?.franchiseSearch?.media || [];
 
-      // Mapeamento em Grafo para agrupar e dedublicar
+      // Mapeamento em Grafo para agrupar e desduplicar
       const nodesMap = new Map<number, any>();
       const idsSet = new Set<number>();
       let detectedAiringDay: string | null = null;
 
       // Função auxiliar para registrar nós válidos
-      const processNode = (node: any, relationTypeHint?: string) => {
+      const processNode = (node: any, relationTypeHint?: string, isDirectRelation = false) => {
         if (!node) return;
         const formatUpper = (node.format || '').toUpperCase();
         
@@ -752,8 +775,8 @@ export async function fetchAnimeFranchiseTree(
         const english = node.title?.english || '';
         const bestTitle = romaji || english || node.title?.native || 'Obra';
 
-        // 2. Filtro de relevância de franquia
-        if (rootKeywords.length > 0 && !isRelevantFranchiseNode(`${bestTitle} ${english}`, rootKeywords)) {
+        // 2. Filtro de relevância de franquia para itens vindos de busca textual livre
+        if (!isDirectRelation && rootKeywords.length > 0 && !isRelevantFranchiseNode(`${bestTitle} ${english}`, rootKeywords, rootTitle)) {
           return;
         }
 
@@ -777,31 +800,142 @@ export async function fetchAnimeFranchiseTree(
         }
       };
 
+      // Fila de expansão bidimensional (BFS)
+      const exploredAniListIds = new Set<number>();
+      const pendingAniListIds = new Set<number>();
+
+      const registerRelationEdges = (edges: any[]) => {
+        if (!Array.isArray(edges)) return;
+        edges.forEach((edge: any) => {
+          const edgeType = (edge.relationType || '').toUpperCase();
+          if (VALID_RELATION_TYPES.has(edgeType) && edge.node) {
+            processNode(edge.node, edgeType.toLowerCase(), true);
+            if (edge.node.id && !exploredAniListIds.has(edge.node.id)) {
+              pendingAniListIds.add(edge.node.id);
+            }
+          }
+        });
+      };
+
       // 1. Processa o nó alvo pesquisado
       if (targetMedia) {
-        processNode(targetMedia, 'main');
+        if (targetMedia.id) exploredAniListIds.add(targetMedia.id);
+        processNode(targetMedia, 'main', true);
         if (targetMedia.relations?.edges) {
-          targetMedia.relations.edges.forEach((edge: any) => {
-            const edgeType = (edge.relationType || '').toUpperCase();
-            if (VALID_RELATION_TYPES.has(edgeType)) {
-              processNode(edge.node, edgeType.toLowerCase());
-            }
-          });
+          registerRelationEdges(targetMedia.relations.edges);
         }
       }
 
       // 2. Processa os nós encontrados na busca abrangente da franquia
       franchiseList.forEach((mediaItem) => {
-        processNode(mediaItem, 'main');
+        if (mediaItem.id) exploredAniListIds.add(mediaItem.id);
+        processNode(mediaItem, 'main', false);
         if (mediaItem.relations?.edges) {
-          mediaItem.relations.edges.forEach((edge: any) => {
-            const edgeType = (edge.relationType || '').toUpperCase();
-            if (VALID_RELATION_TYPES.has(edgeType)) {
-              processNode(edge.node, edgeType.toLowerCase());
-            }
-          });
+          registerRelationEdges(mediaItem.relations.edges);
         }
       });
+
+      // 3. BUSCA BIDIMENSIONAL COMPLETA (BFS):
+      // Percorre prequels (para trás) e sequels (para frente) em profundidade.
+      // Se um anime tem 10 ou 19 temporadas, expande recursivamente todos os elos da cadeia.
+      let expansionRounds = 0;
+      const MAX_EXPANSION_ROUNDS = 4; // 4 rodadas cobrem cadeias de mais de 20 temporadas conectadas
+      while (pendingAniListIds.size > 0 && expansionRounds < MAX_EXPANSION_ROUNDS) {
+        expansionRounds++;
+        const currentBatch = Array.from(pendingAniListIds).slice(0, 45);
+        currentBatch.forEach((id) => {
+          pendingAniListIds.delete(id);
+          exploredAniListIds.add(id);
+        });
+
+        if (currentBatch.length === 0) break;
+
+        try {
+          const batchQuery = `
+            query ($ids: [Int]) {
+              Page(page: 1, perPage: 50) {
+                media(id_in: $ids, type: ANIME) {
+                  id
+                  idMal
+                  title {
+                    romaji
+                    english
+                    native
+                  }
+                  status
+                  nextAiringEpisode {
+                    airingAt
+                  }
+                  format
+                  episodes
+                  seasonYear
+                  startDate {
+                    year
+                    month
+                    day
+                  }
+                  coverImage {
+                    large
+                    medium
+                  }
+                  relations {
+                    edges {
+                      relationType
+                      node {
+                        id
+                        idMal
+                        title {
+                          romaji
+                          english
+                          native
+                        }
+                        status
+                        format
+                        episodes
+                        seasonYear
+                        startDate {
+                          year
+                          month
+                          day
+                        }
+                        coverImage {
+                          large
+                          medium
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          `;
+
+          const bController = new AbortController();
+          const bTimeout = setTimeout(() => bController.abort(), 6000);
+          const bRes = await fetch('https://graphql.anilist.co', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body: JSON.stringify({ query: batchQuery, variables: { ids: currentBatch } }),
+            signal: bController.signal,
+          });
+          clearTimeout(bTimeout);
+
+          if (bRes.ok) {
+            const bJson = await bRes.json();
+            const batchMedia: any[] = bJson?.data?.Page?.media || [];
+            batchMedia.forEach((m) => {
+              if (m.id) exploredAniListIds.add(m.id);
+              processNode(m, 'sequel', true);
+              if (m.relations?.edges) {
+                registerRelationEdges(m.relations.edges);
+              }
+            });
+          }
+        } catch (bErr) {
+          console.warn('Erro na expansão bidimensional BFS da franquia:', bErr);
+          break;
+        }
+      }
 
       const collectedList = Array.from(nodesMap.values());
 
@@ -1215,6 +1349,7 @@ export async function syncFranchiseSeasonsForAnime(
 
 /**
  * Verifica se dois animes pertencem à mesma franquia (cruzamento de ID, franchiseIds ou título raiz)
+ * Prioridade absoluta para IDs (mal_id, franchiseIds). Para títulos, impede falsos positivos em nomes comuns (ex: "Another").
  */
 export function checkIsSameFranchise(
   userAnime: { mal_id?: number | null; franchiseIds?: number[]; franchiseTitle?: string; title: string; japaneseTitle?: string },
@@ -1229,44 +1364,54 @@ export function checkIsSameFranchise(
     return true;
   }
 
-  // 2. Match por Franchise IDs
+  // 2. Match por Franchise IDs unificados
   if (candId && userAnime.franchiseIds && userAnime.franchiseIds.includes(candId)) {
     return true;
   }
+
+  // Helper para proteção contra palavras genéricas/curtas que jamais devem aceitar substring
+  const isGenericShortWord = (r: string) => {
+    if (!r || r.length <= 4) return true;
+    const COMMON_WORDS = new Set(['another', 'monster', 'nana', 'free', 'orange', 'major', 'clannad', 'shiki', 'given', 'solo', 'alive', 'blood', 'reset', 'restart', 'world', 'story']);
+    return COMMON_WORDS.has(r);
+  };
+
+  const isSafeTitleMatch = (u: string, c: string): boolean => {
+    if (!u || !c) return false;
+    if (u === c) return true;
+    if (isGenericShortWord(u) || isGenericShortWord(c)) return false;
+    if (u.length >= 6 && (c.startsWith(u + ':') || c.startsWith(u + ' -') || c.startsWith(u + ' –'))) return true;
+    if (c.length >= 6 && (u.startsWith(c + ':') || u.startsWith(c + ' -') || u.startsWith(c + ' –'))) return true;
+    return false;
+  };
 
   // 3. Match por Raiz de Franquia (unificada pelo normalizador)
   const uRoot = (userAnime.franchiseTitle || getFranchiseRootTitle(userAnime.title)).toLowerCase().trim();
   const cRoot = getFranchiseRootTitle(candidate.title).toLowerCase().trim();
   const cEngRoot = candidate.title_english ? getFranchiseRootTitle(candidate.title_english).toLowerCase().trim() : '';
 
-  if (uRoot && cRoot) {
-    if (uRoot === cRoot) return true;
-    if (uRoot.length >= 4 && cRoot.length >= 4) {
-      if (uRoot.includes(cRoot) || cRoot.includes(uRoot)) return true;
-    }
+  if (uRoot && cRoot && isSafeTitleMatch(uRoot, cRoot)) {
+    return true;
   }
 
-  if (uRoot && cEngRoot) {
-    if (uRoot === cEngRoot) return true;
-    if (uRoot.length >= 4 && cEngRoot.length >= 4) {
-      if (uRoot.includes(cEngRoot) || cEngRoot.includes(uRoot)) return true;
-    }
+  if (uRoot && cEngRoot && isSafeTitleMatch(uRoot, cEngRoot)) {
+    return true;
   }
 
-  // 4. Match por Título Japonês
+  // 4. Match por Título Japonês exato
   if (userAnime.japaneseTitle && candidate.title_japanese) {
     const uj = userAnime.japaneseTitle.toLowerCase().trim();
     const cj = candidate.title_japanese.toLowerCase().trim();
-    if (uj === cj || (uj.length >= 4 && (uj.includes(cj) || cj.includes(uj)))) {
+    if (uj === cj) {
       return true;
     }
   }
 
   // 5. Match cruzado entre título customizado do usuário e títulos oficiais
   const uCustomTitle = userAnime.title.toLowerCase().trim();
-  if (candidate.title_english && uCustomTitle.length >= 4) {
+  if (candidate.title_english) {
     const cEng = candidate.title_english.toLowerCase().trim();
-    if (uCustomTitle === cEng || (cEng.length >= 4 && (uCustomTitle.includes(cEng) || cEng.includes(uCustomTitle)))) {
+    if (uCustomTitle === cEng && !isGenericShortWord(uCustomTitle)) {
       return true;
     }
   }

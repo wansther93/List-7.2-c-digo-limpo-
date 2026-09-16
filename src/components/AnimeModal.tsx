@@ -255,7 +255,10 @@ export const AnimeModal: React.FC<AnimeModalProps> = ({
     if (item.mal_id) {
       setMalId(item.mal_id);
     }
-    const detectedRoot = getFranchiseRootTitle(item.title) || getFranchiseRootTitle(userTypedTitle);
+    // A raiz da franquia é prioritariamente baseada no título digitado pelo usuário, permitindo escolha de capa totalmente livre (mesmo de OVA ou filme)
+    const detectedRoot = userTypedTitle
+      ? getFranchiseRootTitle(userTypedTitle)
+      : (getFranchiseRootTitle(item.title) || item.title);
     if (detectedRoot) {
       setFranchiseTitle(detectedRoot);
     } else {
