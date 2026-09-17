@@ -12,6 +12,8 @@ import {
 } from 'firebase/auth';
 import { 
   getFirestore, 
+  initializeFirestore,
+  setLogLevel,
   type Firestore 
 } from 'firebase/firestore';
 import firebaseConfigJson from '../../firebase-applet-config.json';
@@ -28,6 +30,18 @@ const firebaseConfig = {
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
+
+// Suprime mensagens de diagnóstico interno não-críticas do Firestore
+setLogLevel('error');
+
+// Inicialização resiliente com auto-detecção de long-polling (evita timeout de 10s em proxies, iframes e redes móveis)
+try {
+  initializeFirestore(app, {
+    experimentalAutoDetectLongPolling: true,
+  }, firebaseConfigJson.firestoreDatabaseId);
+} catch {
+  // Ignora se já estiver inicializado em hot-reload
+}
 
 // Inicialização oficial do Cloud Firestore conforme especificação do Firebase Skill
 export const db: Firestore = getFirestore(app, firebaseConfigJson.firestoreDatabaseId);

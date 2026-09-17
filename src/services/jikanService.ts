@@ -369,41 +369,54 @@ async function searchJikan(query: string): Promise<JikanAnimeResult[]> {
  * 3. Provedor Terciário: Kitsu Anime API
  */
 async function searchKitsu(query: string): Promise<JikanAnimeResult[]> {
-  const url = `https://kitsu.io/api/edge/anime?filter[text]=${encodeURIComponent(query.trim())}&page[limit]=6`;
-  const response = await fetch(url);
-  if (!response.ok) throw new Error(`Kitsu returned status ${response.status}`);
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 6000);
+    const url = `https://kitsu.io/api/edge/anime?filter[text]=${encodeURIComponent(query.trim())}&page[limit]=6`;
+    const response = await fetch(url, {
+      headers: {
+        Accept: 'application/vnd.api+json',
+      },
+      signal: controller.signal,
+    }).finally(() => clearTimeout(timeoutId));
 
-  const json = await response.json();
-  if (!json.data || !Array.isArray(json.data) || json.data.length === 0) return [];
+    if (!response.ok) return [];
 
-  return json.data.map((item: any) => {
-    const attrs = item.attributes || {};
-    const bestTitle =
-      attrs.canonicalTitle ||
-      attrs.titles?.en_jp ||
-      attrs.titles?.en ||
-      attrs.titles?.ja_jp ||
-      query;
-    const cover =
-      attrs.posterImage?.large ||
-      attrs.posterImage?.original ||
-      attrs.posterImage?.medium ||
-      '';
+    const json = await response.json();
+    if (!json.data || !Array.isArray(json.data) || json.data.length === 0) return [];
 
-    return {
-      mal_id: parseInt(item.id, 10) || Date.now(),
-      title: bestTitle,
-      title_japanese: attrs.titles?.ja_jp || '',
-      title_english: attrs.titles?.en || '',
-      episodes: attrs.episodeCount || null,
-      status: attrs.status || '',
-      synopsis: attrs.synopsis || null,
-      imageUrl: cover,
-      genres: [],
-      broadcastDay: null,
-      year: attrs.startDate ? new Date(attrs.startDate).getFullYear() : undefined,
-    };
-  });
+    return json.data.map((item: any) => {
+      const attrs = item.attributes || {};
+      const bestTitle =
+        attrs.canonicalTitle ||
+        attrs.titles?.en_jp ||
+        attrs.titles?.en ||
+        attrs.titles?.ja_jp ||
+        query;
+      const cover =
+        attrs.posterImage?.large ||
+        attrs.posterImage?.original ||
+        attrs.posterImage?.medium ||
+        '';
+
+      return {
+        mal_id: parseInt(item.id, 10) || Date.now(),
+        title: bestTitle,
+        title_japanese: attrs.titles?.ja_jp || '',
+        title_english: attrs.titles?.en || '',
+        episodes: attrs.episodeCount || null,
+        status: attrs.status || '',
+        synopsis: attrs.synopsis || null,
+        imageUrl: cover,
+        genres: [],
+        broadcastDay: null,
+        year: attrs.startDate ? new Date(attrs.startDate).getFullYear() : undefined,
+      };
+    });
+  } catch (err) {
+    console.warn('Busca alternativa via Kitsu indisponível:', err);
+    return [];
+  }
 }
 
 /**
@@ -834,7 +847,15 @@ export const getWeeklySchedule = async (dayPt?: string): Promise<ScheduleAnimeIt
 
   // 3. Fallback via Kitsu API
   try {
-    const res = await fetch('https://kitsu.io/api/edge/trending/anime?limit=20');
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 6000);
+    const res = await fetch('https://kitsu.io/api/edge/trending/anime?limit=20', {
+      headers: {
+        Accept: 'application/vnd.api+json',
+      },
+      signal: controller.signal,
+    }).finally(() => clearTimeout(timeoutId));
+
     if (res.ok) {
       const json = await res.json();
       const list = json.data || [];
@@ -868,7 +889,12 @@ export const getWeeklySchedule = async (dayPt?: string): Promise<ScheduleAnimeIt
       return deduplicated;
     }
   } catch (err) {
-    console.error('Fallback Kitsu schedules falhou:', err);
+    console.warn('Fallback Kitsu schedules indisponível:', err);
+  }
+
+  // Fallback offline / cache anterior se disponível
+  if (localCached && localCached.length > 0) {
+    return localCached;
   }
 
   return [];
