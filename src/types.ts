@@ -111,6 +111,17 @@ export interface FranchiseTreeItem {
   isCurrent?: boolean;
 }
 
+export interface FranchiseCandidate {
+  clusterId: number;
+  title: string;
+  year?: number | null;
+  format?: string;
+  coverUrl?: string;
+  itemCount: number;
+  items: FranchiseTreeItem[];
+  franchiseIds: number[];
+}
+
 export interface AnimeArcPreset {
   id: string;
   name: string;

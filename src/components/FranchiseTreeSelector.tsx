@@ -24,7 +24,7 @@ import {
   Edit3,
   X
 } from 'lucide-react';
-import type { AnimeSeasonOrArc, FranchiseTreeItem, AnimeArcPreset } from '../types';
+import type { AnimeSeasonOrArc, FranchiseTreeItem, AnimeArcPreset, FranchiseCandidate } from '../types';
 import { 
   fetchAnimeFranchiseTree, 
   buildSeasonsFromFranchiseSelection, 
@@ -78,6 +78,8 @@ export const FranchiseTreeSelector: React.FC<FranchiseTreeSelectorProps> = ({
   const [customSearchQuery, setCustomSearchQuery] = useState('');
   const [isSearchingCustom, setIsSearchingCustom] = useState(false);
   const [franchiseItems, setFranchiseItems] = useState<FranchiseTreeItem[]>([]);
+  const [candidateFranchises, setCandidateFranchises] = useState<FranchiseCandidate[]>([]);
+  const [selectedClusterId, setSelectedClusterId] = useState<number | null>(null);
   const [predefinedArcs, setPredefinedArcs] = useState<AnimeArcPreset[]>([]);
   const [franchiseIds, setFranchiseIds] = useState<number[]>([]);
   const [rootTitle, setRootTitle] = useState<string>('');
@@ -125,6 +127,14 @@ export const FranchiseTreeSelector: React.FC<FranchiseTreeSelectorProps> = ({
       setFranchiseIds(res.franchiseIds);
       setRootTitle(res.rootTitle);
       setActiveAiringDay(res.activeAiringDay || null);
+
+      const cands = res.candidateFranchises || [];
+      setCandidateFranchises(cands);
+      if (cands.length > 1) {
+        setSelectedClusterId(cands[0].clusterId);
+      } else {
+        setSelectedClusterId(null);
+      }
       
       if (res.predefinedArcs && res.predefinedArcs.length > 0) {
         const filteredArcs = res.predefinedArcs.filter((arc) => {
@@ -158,6 +168,31 @@ export const FranchiseTreeSelector: React.FC<FranchiseTreeSelectorProps> = ({
       console.warn('Erro ao carregar árvore de franquia:', err);
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Alterna entre candidatos de franquia quando a busca encontrou múltiplas obras distintas
+  const handleSelectCandidateFranchise = (cand: FranchiseCandidate) => {
+    setSelectedClusterId(cand.clusterId);
+    setRootTitle(cand.title);
+    setFranchiseIds(cand.franchiseIds);
+
+    const activeExcluded = excludedItemIds || [];
+    const excludedNorm = activeExcluded.map((x) => String(x).toLowerCase().trim());
+
+    const filteredItems = cand.items.filter((it) => {
+      if (excludedNorm.includes(String(it.id).toLowerCase().trim())) return false;
+      if (it.title && excludedNorm.includes(it.title.toLowerCase().trim())) return false;
+      if (it.englishTitle && excludedNorm.includes(it.englishTitle.toLowerCase().trim())) return false;
+      return true;
+    });
+
+    setFranchiseItems(filteredItems);
+    if (filteredItems.length > 0) {
+      const found = filteredItems.find((it) => it.title.toLowerCase() === currentSeasonName.toLowerCase());
+      setSelectedItemId(found ? found.id : filteredItems[0].id);
+    } else {
+      setSelectedItemId('');
     }
   };
 
@@ -401,6 +436,61 @@ export const FranchiseTreeSelector: React.FC<FranchiseTreeSelectorProps> = ({
                 <ListTree className="w-3.5 h-3.5" />
                 <span>Por Arcos da História ({predefinedArcs.length})</span>
               </button>
+            </div>
+          )}
+
+          {/* Desambiguação de Franquia: visível apenas se a busca por termo comum retornou múltiplas obras distintas */}
+          {candidateFranchises.length > 1 && (
+            <div className="p-3 rounded-2xl bg-indigo-950/30 border border-indigo-500/25 space-y-2">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <span className="text-xs font-bold text-indigo-300 flex items-center gap-1.5">
+                  <SlidersHorizontal className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                  <span>Encontramos mais de uma obra para esta busca. Selecione a franquia:</span>
+                </span>
+                <span className="text-[10px] text-slate-400 font-medium">
+                  {candidateFranchises.length} obras identificadas
+                </span>
+              </div>
+              <div className="flex items-center gap-2 overflow-x-auto pb-1 no-scrollbar overscroll-contain">
+                {candidateFranchises.map((cand) => {
+                  const isActive = selectedClusterId === cand.clusterId;
+                  return (
+                    <button
+                      key={`candidate_franchise_${cand.clusterId}`}
+                      type="button"
+                      onClick={() => handleSelectCandidateFranchise(cand)}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 flex items-center gap-2 border cursor-pointer ${
+                        isActive
+                          ? 'bg-indigo-600 text-white border-indigo-400 shadow-md ring-1 ring-indigo-400/50'
+                          : 'bg-white/5 text-slate-300 border-white/10 hover:border-white/20 hover:bg-white/10'
+                      }`}
+                    >
+                      {cand.coverUrl && (
+                        <img
+                          src={cand.coverUrl}
+                          alt={cand.title}
+                          referrerPolicy="no-referrer"
+                          className="w-4 h-5 object-cover rounded shadow-xs shrink-0"
+                        />
+                      )}
+                      <span className="truncate max-w-[140px] sm:max-w-[220px]">{cand.title}</span>
+                      {cand.year && (
+                        <span className={`text-[10px] ${isActive ? 'text-indigo-200' : 'text-slate-500'}`}>
+                          ({cand.year})
+                        </span>
+                      )}
+                      <span
+                        className={`text-[10px] px-1.5 py-0.5 rounded font-mono ${
+                          isActive ? 'bg-indigo-700 text-white' : 'bg-white/10 text-slate-400'
+                        }`}
+                      >
+                        {cand.itemCount} {cand.itemCount === 1 ? 'item' : 'itens'}
+                      </span>
+                      {isActive && <Check className="w-3 h-3 text-white shrink-0 ml-0.5" />}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           )}
 
